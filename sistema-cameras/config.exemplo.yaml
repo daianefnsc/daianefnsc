@@ -20,14 +20,19 @@ movimento:
   segundos_fim: 5      # segundos sem movimento para encerrar o evento
 
 cameras:
-  # Intelbras (padrão Dahua). "subtype=0" = alta qualidade (gravação),
-  # "subtype=1" = baixa qualidade (análise de movimento e ao vivo, mais leve).
+  # Câmeras do app iCSee. "stream=0" = alta qualidade (gravação),
+  # "stream=1" = baixa qualidade (análise de movimento e ao vivo, mais leve).
+  # Troque IP e SENHA pelos da sua câmera (usuário padrão: admin).
   - nome: "Sala"
-    principal: "rtsp://admin:SENHA@192.168.1.10:554/cam/realmonitor?channel=1&subtype=0"
-    secundario: "rtsp://admin:SENHA@192.168.1.10:554/cam/realmonitor?channel=1&subtype=1"
+    principal: "rtsp://192.168.1.10:554/user=admin&password=SENHA&channel=1&stream=0.sdp"
+    secundario: "rtsp://192.168.1.10:554/user=admin&password=SENHA&channel=1&stream=1.sdp"
     gravar: true
 
   - nome: "Garagem"
-    principal: "rtsp://admin:SENHA@192.168.1.11:554/cam/realmonitor?channel=1&subtype=0"
-    secundario: "rtsp://admin:SENHA@192.168.1.11:554/cam/realmonitor?channel=1&subtype=1"
+    principal: "rtsp://192.168.1.11:554/user=admin&password=SENHA&channel=1&stream=0.sdp"
+    secundario: "rtsp://192.168.1.11:554/user=admin&password=SENHA&channel=1&stream=1.sdp"
     gravar: true
+
+  # Outras Intelbras (app Mibo/iSIC) usam este formato:
+  # principal:  "rtsp://admin:SENHA@IP:554/cam/realmonitor?channel=1&subtype=0"
+  # secundario: "rtsp://admin:SENHA@IP:554/cam/realmonitor?channel=1&subtype=1"
