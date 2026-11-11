@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Minhas Câmeras</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icone.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icone-192.png">
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <!-- Login -->
+  <section id="tela-login" class="login" hidden>
+    <form id="form-login">
+      <img src="icone.svg" alt="" width="72" height="72">
+      <h1>Minhas Câmeras</h1>
+      <input id="senha" type="password" placeholder="Senha" autocomplete="current-password" required>
+      <button type="submit">Entrar</button>
+      <p id="erro-login" class="erro"></p>
+    </form>
+  </section>
+
+  <!-- App -->
+  <main id="tela-app" hidden>
+    <header class="topo">
+      <h1 id="titulo">Ao vivo</h1>
+      <span id="disco" class="discreto"></span>
+    </header>
+
+    <section id="aba-ao-vivo" class="aba">
+      <div id="grade-cameras" class="grade"></div>
+    </section>
+
+    <section id="aba-eventos" class="aba" hidden>
+      <div class="filtros">
+        <select id="ev-camera"></select>
+        <input id="ev-dia" type="date">
+      </div>
+      <div id="lista-eventos" class="eventos"></div>
+    </section>
+
+    <section id="aba-gravacoes" class="aba" hidden>
+      <div class="filtros">
+        <select id="gr-camera"></select>
+        <input id="gr-dia" type="date">
+      </div>
+      <video id="player" controls playsinline hidden></video>
+      <div id="lista-gravacoes" class="lista"></div>
+    </section>
+
+    <section id="aba-dados" class="aba" hidden>
+      <div class="filtros">
+        <select id="dd-dias">
+          <option value="7">Últimos 7 dias</option>
+          <option value="30" selected>Últimos 30 dias</option>
+          <option value="90">Últimos 90 dias</option>
+        </select>
+        <a id="baixar-csv" class="botao" href="api/eventos.csv" download>⬇ CSV</a>
+      </div>
+      <div id="cartoes" class="cartoes"></div>
+      <div class="grafico"><h2>Eventos por dia</h2><canvas id="g-dia"></canvas></div>
+      <div class="grafico"><h2>Horário dos movimentos</h2><canvas id="g-hora"></canvas></div>
+      <div class="grafico"><h2>Dia da semana</h2><canvas id="g-semana"></canvas></div>
+      <button id="sair" class="botao secundario">Sair</button>
+    </section>
+
+    <nav class="menu">
+      <button data-aba="ao-vivo" class="ativo"><span>📹</span>Ao vivo</button>
+      <button data-aba="eventos"><span>🔔</span>Eventos</button>
+      <button data-aba="gravacoes"><span>🎞️</span>Gravações</button>
+      <button data-aba="dados"><span>📊</span>Dados</button>
+    </nav>
+  </main>
+
+  <!-- Foto do evento em tela cheia -->
+  <div id="visor" class="visor" hidden><img alt=""></div>
+
+  <script src="chart.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

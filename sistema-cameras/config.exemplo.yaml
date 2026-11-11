@@ -1,0 +1,33 @@
+# Copie este arquivo para config.yaml e preencha com os dados das suas câmeras.
+# (o config.yaml NÃO vai para o GitHub, porque tem senhas)
+
+# Senha para entrar no sistema (pelo navegador/celular)
+senha: "troque-esta-senha"
+
+# Onde ficam gravações, fotos dos eventos e o banco de dados
+pasta_dados: "dados"
+
+# Quantos dias de vídeo guardar (os mais antigos são apagados automaticamente).
+# Os EVENTOS (dados) continuam no banco para sempre, só os vídeos/fotos são apagados.
+dias_guardar: 7
+
+# Tamanho de cada arquivo de vídeo, em minutos
+segmento_minutos: 10
+
+movimento:
+  sensibilidade: 25    # 0-255: quanto um pixel precisa mudar (maior = menos sensível)
+  area_minima: 1.5     # % da imagem que precisa mudar para contar como movimento
+  segundos_fim: 5      # segundos sem movimento para encerrar o evento
+
+cameras:
+  # Intelbras (padrão Dahua). "subtype=0" = alta qualidade (gravação),
+  # "subtype=1" = baixa qualidade (análise de movimento e ao vivo, mais leve).
+  - nome: "Sala"
+    principal: "rtsp://admin:SENHA@192.168.1.10:554/cam/realmonitor?channel=1&subtype=0"
+    secundario: "rtsp://admin:SENHA@192.168.1.10:554/cam/realmonitor?channel=1&subtype=1"
+    gravar: true
+
+  - nome: "Garagem"
+    principal: "rtsp://admin:SENHA@192.168.1.11:554/cam/realmonitor?channel=1&subtype=0"
+    secundario: "rtsp://admin:SENHA@192.168.1.11:554/cam/realmonitor?channel=1&subtype=1"
+    gravar: true
