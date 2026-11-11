@@ -36,13 +36,23 @@ class Camera:
         self.id = slug(self.nome)
         self.principal = str(cfg["principal"])
         self.secundario = str(cfg.get("secundario") or cfg["principal"])
-        self.gravar = cfg.get("gravar", True)
+        # gravar: "continuo" (24h), "movimento" (só clipes com movimento) ou "nao"
+        modo = cfg.get("gravar", "continuo")
+        if modo is True:
+            modo = "continuo"
+        self.modo = "nao" if modo in (False, None, "nao", "não") else str(modo)
+        if self.modo not in ("continuo", "movimento", "nao"):
+            raise ValueError(f"[{self.nome}] gravar deve ser continuo, movimento ou nao")
+        # qualidade "baixa" grava o stream secundário: ocupa ~5x menos espaço
+        self.fonte_gravacao = self.secundario if cfg.get("qualidade") == "baixa" else self.principal
 
         mov = config.get("movimento", {})
         self.sensibilidade = int(mov.get("sensibilidade", 25))
         self.area_minima = float(mov.get("area_minima", 1.5))
         self.segundos_fim = float(mov.get("segundos_fim", 5))
         self.segmento = int(config.get("segmento_minutos", 10)) * 60
+        if self.modo == "movimento":
+            self.segmento = 60  # pedaços curtos: os sem movimento são apagados
 
         dados = Path(config["pasta_dados"])
         self.pasta_videos = dados / "gravacoes" / self.id
@@ -67,8 +77,10 @@ class Camera:
     def iniciar(self):
         self.rodando = True
         threading.Thread(target=self._loop_analise, daemon=True).start()
-        if self.gravar:
+        if self.modo != "nao":
             threading.Thread(target=self._loop_gravacao, daemon=True).start()
+        if self.modo == "movimento":
+            threading.Thread(target=self._loop_descartar_sem_movimento, daemon=True).start()
 
     def parar(self):
         self.rodando = False
@@ -82,6 +94,7 @@ class Camera:
             "nome": self.nome,
             "online": self.online,
             "gravando": self.gravando,
+            "modo": self.modo,
             "em_movimento": self.em_movimento,
             "area": round(self.area_atual, 2),
         }
@@ -93,9 +106,10 @@ class Camera:
     # -------------------------------------------------------------- gravação
     def _loop_gravacao(self):
         while self.rodando:
-            entrada = ["-rtsp_transport", "tcp", "-i", self.principal]
-            if eh_arquivo(self.principal):
-                entrada = ["-re", "-stream_loop", "-1", "-i", self.principal]
+            fonte = self.fonte_gravacao
+            entrada = ["-rtsp_transport", "tcp", "-i", fonte]
+            if eh_arquivo(fonte):
+                entrada = ["-re", "-stream_loop", "-1", "-i", fonte]
             cmd = [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
                 *entrada,
@@ -120,6 +134,30 @@ class Camera:
             self.gravando = False
             if self.rodando:
                 time.sleep(10)  # câmera caiu? tenta de novo
+
+    def _loop_descartar_sem_movimento(self):
+        """Modo "movimento": apaga os pedaços de 1 min sem nenhum evento por perto.
+        Fica 1 min antes e 1 min depois de cada movimento, para dar contexto."""
+        while self.rodando:
+            time.sleep(30)
+            self._descartar_sem_movimento()
+
+    def _descartar_sem_movimento(self, margem: int = 60):
+        arquivos = sorted(self.pasta_videos.glob("*.mp4"))
+        for atual, proximo in zip(arquivos, arquivos[1:]):  # o último ainda está gravando
+            try:
+                inicio = datetime.strptime(atual.stem, "%Y-%m-%d_%H-%M-%S").timestamp()
+                fim = datetime.strptime(proximo.stem, "%Y-%m-%d_%H-%M-%S").timestamp()
+            except ValueError:
+                continue
+            if time.time() - fim < 3 * margem:
+                continue  # recente demais: um movimento ainda pode aparecer
+            n = self.banco.consultar(
+                "SELECT COUNT(*) AS n FROM eventos WHERE camera = ? AND inicio < ? AND COALESCE(fim, ?) > ?",
+                (self.id, fim + margem, time.time(), inicio - margem),
+            )[0]["n"]
+            if n == 0:
+                atual.unlink(missing_ok=True)
 
     # --------------------------------------------------------------- análise
     def _loop_analise(self):

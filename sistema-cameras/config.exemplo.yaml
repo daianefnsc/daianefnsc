@@ -11,7 +11,11 @@ pasta_dados: "dados"
 # Os EVENTOS (dados) continuam no banco para sempre, só os vídeos/fotos são apagados.
 dias_guardar: 7
 
-# Tamanho de cada arquivo de vídeo, em minutos
+# Se o espaço livre ficar abaixo disso (GB), apaga os vídeos mais antigos.
+# Assim o tablet/computador nunca enche.
+espaco_minimo_gb: 5
+
+# Tamanho de cada arquivo de vídeo, em minutos (no modo "continuo")
 segmento_minutos: 10
 
 movimento:
@@ -23,15 +27,24 @@ cameras:
   # Câmeras do app iCSee. "stream=0" = alta qualidade (gravação),
   # "stream=1" = baixa qualidade (análise de movimento e ao vivo, mais leve).
   # Troque IP e SENHA pelos da sua câmera (usuário padrão: admin).
+  #
+  # gravar:    "continuo"  = grava 24h no tablet/computador
+  #            "movimento" = guarda só os trechos com movimento (1 min antes e depois)
+  #            "nao"       = não grava, só ao vivo + detecção + dados
+  # qualidade: "alta" (padrão) ou "baixa" (ocupa ~5x menos espaço)
+
+  # Câmera SEM cartão de memória: o sistema grava 24h
   - nome: "Sala"
     principal: "rtsp://192.168.1.10:554/user=admin&password=SENHA&channel=1&stream=0.sdp"
     secundario: "rtsp://192.168.1.10:554/user=admin&password=SENHA&channel=1&stream=1.sdp"
-    gravar: true
+    gravar: "continuo"
+    qualidade: "alta"
 
+  # Câmera COM cartão: ela já grava 24h sozinha, o sistema guarda só os movimentos
   - nome: "Garagem"
     principal: "rtsp://192.168.1.11:554/user=admin&password=SENHA&channel=1&stream=0.sdp"
     secundario: "rtsp://192.168.1.11:554/user=admin&password=SENHA&channel=1&stream=1.sdp"
-    gravar: true
+    gravar: "movimento"
 
   # Outras Intelbras (app Mibo/iSIC) usam este formato:
   # principal:  "rtsp://admin:SENHA@IP:554/cam/realmonitor?channel=1&subtype=0"

@@ -1,6 +1,9 @@
 """Servidor web: API + página do app.
 
-Rodar:  uvicorn app.main:app --host 0.0.0.0 --port 8000
+Rodar:  python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+Usa Starlette (Python puro, sem partes compiladas) para instalar fácil
+até em tablet/celular Android.
 """
 import asyncio
 import csv
@@ -16,9 +19,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from .camera import Camera
 from .db import Banco
@@ -37,65 +43,81 @@ for c in CONFIG["cameras"]:
     cameras[cam.id] = cam
 
 TOKEN = hmac.new(str(CONFIG["senha"]).encode(), b"sistema-cameras", hashlib.sha256).hexdigest()
+rotas: list[Route] = []
+
+
+def rota(caminho: str, metodos=("GET",), publica=False):
+    """Registra uma rota da API. Por padrão exige login."""
+    def registrar(func):
+        async def handler(request: Request):
+            if not publica and not hmac.compare_digest(request.cookies.get("token", ""), TOKEN):
+                return JSONResponse({"erro": "Faça login"}, status_code=401)
+            try:
+                resultado = func(request)
+                if asyncio.iscoroutine(resultado):
+                    resultado = await resultado
+            except HTTPException as e:
+                return JSONResponse({"erro": e.detail}, status_code=e.status_code)
+            except ValueError:
+                return JSONResponse({"erro": "Parâmetro inválido"}, status_code=400)
+            return resultado if isinstance(resultado, Response) else JSONResponse(resultado)
+        rotas.append(Route(caminho, handler, methods=list(metodos)))
+        return func
+    return registrar
+
+
+def pegar_camera(cam_id: str | None) -> Camera:
+    if cam_id not in cameras:
+        raise HTTPException(404, "Câmera não encontrada")
+    return cameras[cam_id]
 
 
 # ------------------------------------------------------------ limpeza antiga
 def limpar_antigos():
-    """Apaga vídeos e fotos com mais de `dias_guardar` dias. Os dados ficam."""
+    """Apaga vídeos e fotos com mais de `dias_guardar` dias e, se o espaço livre
+    ficar abaixo de `espaco_minimo_gb`, apaga os vídeos mais antigos até liberar.
+    Os dados dos eventos (banco) nunca são apagados."""
     dias = float(CONFIG.get("dias_guardar", 7))
+    minimo = float(CONFIG.get("espaco_minimo_gb", 5)) * 1e9
     while True:
         limite = time.time() - dias * 86400
         for pasta in ("gravacoes", "eventos"):
             for arq in (DADOS / pasta).glob("*/*"):
                 if arq.is_file() and arq.stat().st_mtime < limite:
                     arq.unlink(missing_ok=True)
-        time.sleep(1800)
-
-
-@asynccontextmanager
-async def ciclo(_app):
-    for cam in cameras.values():
-        cam.iniciar()
-    threading.Thread(target=limpar_antigos, daemon=True).start()
-    yield
-    for cam in cameras.values():
-        cam.parar()
-
-
-app = FastAPI(title="Sistema de Câmeras", lifespan=ciclo)
+        if shutil.disk_usage(DADOS).free < minimo:
+            # do mais antigo para o mais novo, sem mexer nos que estão gravando agora
+            videos = sorted((DADOS / "gravacoes").glob("*/*.mp4"), key=lambda a: a.stat().st_mtime)
+            for arq in videos:
+                if shutil.disk_usage(DADOS).free >= minimo or time.time() - arq.stat().st_mtime < 120:
+                    break
+                print(f"Pouco espaço: apagando {arq.name}")
+                arq.unlink(missing_ok=True)
+        time.sleep(300)
 
 
 # ------------------------------------------------------------------- login
-def logado(request: Request):
-    if not hmac.compare_digest(request.cookies.get("token", ""), TOKEN):
-        raise HTTPException(401, "Faça login")
-
-
-@app.post("/api/login")
-async def login(request: Request, response: Response):
+@rota("/api/login", metodos=("POST",), publica=True)
+async def login(request: Request):
     dados = await request.json()
     if not hmac.compare_digest(str(dados.get("senha", "")), str(CONFIG["senha"])):
         await asyncio.sleep(1)  # dificulta adivinhar a senha
         raise HTTPException(401, "Senha incorreta")
-    response.set_cookie("token", TOKEN, max_age=60 * 60 * 24 * 90, httponly=True, samesite="lax")
-    return {"ok": True}
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie("token", TOKEN, max_age=60 * 60 * 24 * 90, httponly=True, samesite="lax")
+    return resp
 
 
-@app.post("/api/sair")
-def sair(response: Response):
-    response.delete_cookie("token")
-    return {"ok": True}
-
-
-def pegar_camera(cam_id: str) -> Camera:
-    if cam_id not in cameras:
-        raise HTTPException(404, "Câmera não encontrada")
-    return cameras[cam_id]
+@rota("/api/sair", metodos=("POST",), publica=True)
+def sair(request: Request):
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("token")
+    return resp
 
 
 # ----------------------------------------------------------------- câmeras
-@app.get("/api/cameras", dependencies=[Depends(logado)])
-def listar_cameras():
+@rota("/api/cameras")
+def listar_cameras(request: Request):
     uso = shutil.disk_usage(DADOS)
     return {
         "cameras": [c.status() for c in cameras.values()],
@@ -103,17 +125,17 @@ def listar_cameras():
     }
 
 
-@app.get("/api/cameras/{cam_id}/foto", dependencies=[Depends(logado)])
-def foto_atual(cam_id: str):
-    img = pegar_camera(cam_id).imagem()
+@rota("/api/cameras/{cam_id}/foto")
+def foto_atual(request: Request):
+    img = pegar_camera(request.path_params["cam_id"]).imagem()
     if not img:
         raise HTTPException(503, "Câmera sem imagem")
     return Response(img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
-@app.get("/api/cameras/{cam_id}/ao-vivo", dependencies=[Depends(logado)])
-async def ao_vivo(cam_id: str, request: Request):
-    cam = pegar_camera(cam_id)
+@rota("/api/cameras/{cam_id}/ao-vivo")
+def ao_vivo(request: Request):
+    cam = pegar_camera(request.path_params["cam_id"])
 
     async def gerar():
         ultima = None
@@ -128,7 +150,8 @@ async def ao_vivo(cam_id: str, request: Request):
 
 
 # ----------------------------------------------------------------- eventos
-def filtro_eventos(camera: str | None, dia: str | None):
+def filtro_eventos(request: Request):
+    camera, dia = request.query_params.get("camera"), request.query_params.get("dia")
     where, params = ["1=1"], []
     if camera:
         where.append("camera = ?")
@@ -140,33 +163,32 @@ def filtro_eventos(camera: str | None, dia: str | None):
     return " AND ".join(where), params
 
 
-@app.get("/api/eventos", dependencies=[Depends(logado)])
-def listar_eventos(camera: str | None = None, dia: str | None = None, limite: int = 100):
-    where, params = filtro_eventos(camera, dia)
-    linhas = banco.consultar(
-        f"SELECT * FROM eventos WHERE {where} ORDER BY inicio DESC LIMIT ?", params + [min(limite, 1000)]
-    )
+@rota("/api/eventos")
+def listar_eventos(request: Request):
+    where, params = filtro_eventos(request)
+    limite = min(int(request.query_params.get("limite", 100)), 1000)
+    linhas = banco.consultar(f"SELECT * FROM eventos WHERE {where} ORDER BY inicio DESC LIMIT ?", params + [limite])
     for e in linhas:
         e["tem_foto"] = bool(e["foto"]) and (DADOS / "eventos" / e["foto"]).exists()
         e["duracao"] = round((e["fim"] or time.time()) - e["inicio"], 1)
     return linhas
 
 
-@app.get("/api/eventos/{evento_id}/foto", dependencies=[Depends(logado)])
-def foto_evento(evento_id: int):
-    linhas = banco.consultar("SELECT foto FROM eventos WHERE id = ?", (evento_id,))
+@rota("/api/eventos/{evento_id:int}/foto")
+def foto_evento(request: Request):
+    linhas = banco.consultar("SELECT foto FROM eventos WHERE id = ?", (request.path_params["evento_id"],))
     if not linhas or not linhas[0]["foto"]:
-        raise HTTPException(404)
+        raise HTTPException(404, "Evento não encontrado")
     caminho = DADOS / "eventos" / linhas[0]["foto"]
     if not caminho.exists():
         raise HTTPException(404, "Foto já apagada")
     return FileResponse(caminho, media_type="image/jpeg")
 
 
-@app.get("/api/eventos.csv", dependencies=[Depends(logado)])
-def exportar_csv(camera: str | None = None, dia: str | None = None):
+@rota("/api/eventos.csv")
+def exportar_csv(request: Request):
     """Exporta tudo para analisar no pandas / Excel / Power BI."""
-    where, params = filtro_eventos(camera, dia)
+    where, params = filtro_eventos(request)
     linhas = banco.consultar(f"SELECT * FROM eventos WHERE {where} ORDER BY inicio", params)
     saida = io.StringIO()
     w = csv.writer(saida)
@@ -186,48 +208,46 @@ def exportar_csv(camera: str | None = None, dia: str | None = None):
 
 
 # ---------------------------------------------------------------- gravações
-def dia_passado(dia: str | None) -> bool:
-    return bool(dia) and dia < datetime.now().strftime("%Y-%m-%d")
-
-
-@app.get("/api/gravacoes", dependencies=[Depends(logado)])
-def listar_gravacoes(camera: str, dia: str | None = None):
-    cam = pegar_camera(camera)
-    padrao = f"{dia}_*.mp4" if dia else "*.mp4"
-    arquivos = sorted(cam.pasta_videos.glob(padrao), reverse=True)
+@rota("/api/gravacoes")
+def listar_gravacoes(request: Request):
+    cam = pegar_camera(request.query_params.get("camera"))
+    dia = request.query_params.get("dia")
+    arquivos = sorted(cam.pasta_videos.glob(f"{dia}_*.mp4" if dia else "*.mp4"), reverse=True)
+    ultimo = max(cam.pasta_videos.glob("*.mp4"), default=None)
     resultado = []
-    for i, arq in enumerate(arquivos[:300]):
+    for arq in arquivos[:300]:
         try:
             inicio = datetime.strptime(arq.stem, "%Y-%m-%d_%H-%M-%S").timestamp()
         except ValueError:
             continue
         fim = arq.stat().st_mtime
         eventos = banco.consultar(
-            "SELECT COUNT(*) AS n FROM eventos WHERE camera = ? AND inicio BETWEEN ? AND ?",
-            (cam.id, inicio, fim),
+            "SELECT COUNT(*) AS n FROM eventos WHERE camera = ? AND inicio < ? AND COALESCE(fim, ?) >= ?",
+            (cam.id, fim, time.time(), inicio),
         )[0]["n"]
         resultado.append({
             "arquivo": arq.name,
             "inicio": inicio,
             "tamanho_mb": round(arq.stat().st_size / 1e6, 1),
             "eventos": eventos,
-            "gravando": i == 0 and cam.gravando and not dia_passado(dia),
+            "gravando": arq == ultimo and cam.gravando,
         })
     return resultado
 
 
-@app.get("/api/gravacoes/{camera}/{arquivo}", dependencies=[Depends(logado)])
-def baixar_gravacao(camera: str, arquivo: str):
-    cam = pegar_camera(camera)
-    caminho = (cam.pasta_videos / arquivo).resolve()
+@rota("/api/gravacoes/{camera}/{arquivo}")
+def baixar_gravacao(request: Request):
+    cam = pegar_camera(request.path_params["camera"])
+    caminho = (cam.pasta_videos / request.path_params["arquivo"]).resolve()
     if caminho.parent != cam.pasta_videos.resolve() or not caminho.exists():
-        raise HTTPException(404)
+        raise HTTPException(404, "Gravação não encontrada")
     return FileResponse(caminho, media_type="video/mp4")
 
 
 # -------------------------------------------------------------- estatísticas
-@app.get("/api/estatisticas", dependencies=[Depends(logado)])
-def estatisticas(dias: int = 30):
+@rota("/api/estatisticas")
+def estatisticas(request: Request):
+    dias = max(1, min(int(request.query_params.get("dias", 30)), 366))
     desde = (datetime.now() - timedelta(days=dias - 1)).replace(hour=0, minute=0, second=0).timestamp()
     eventos = banco.consultar(
         "SELECT camera, inicio, COALESCE(fim, inicio) AS fim FROM eventos WHERE inicio >= ?", (desde,)
@@ -239,11 +259,13 @@ def estatisticas(dias: int = 30):
     semana = [0] * 7
     duracao_total = 0.0
     for e in eventos:
-        d = datetime.fromtimestamp(e["inicio"])
         cid = e["camera"]
         if cid not in nomes:
             continue
-        por_dia[cid][d.strftime("%Y-%m-%d")] = por_dia[cid].get(d.strftime("%Y-%m-%d"), 0) + 1
+        d = datetime.fromtimestamp(e["inicio"])
+        chave = d.strftime("%Y-%m-%d")
+        if chave in por_dia[cid]:
+            por_dia[cid][chave] += 1
         por_hora[cid][d.hour] += 1
         semana[d.weekday()] += 1
         duracao_total += e["fim"] - e["inicio"]
@@ -266,5 +288,18 @@ def estatisticas(dias: int = 30):
     }
 
 
-# ------------------------------------------------------------- página do app
-app.mount("/", StaticFiles(directory=RAIZ / "static", html=True), name="static")
+# ------------------------------------------------------------- app completo
+@asynccontextmanager
+async def ciclo(_app):
+    for cam in cameras.values():
+        cam.iniciar()
+    threading.Thread(target=limpar_antigos, daemon=True).start()
+    yield
+    for cam in cameras.values():
+        cam.parar()
+
+
+app = Starlette(
+    routes=[*rotas, Mount("/", StaticFiles(directory=RAIZ / "static", html=True), name="static")],
+    lifespan=ciclo,
+)

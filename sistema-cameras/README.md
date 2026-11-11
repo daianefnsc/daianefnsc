@@ -1,127 +1,174 @@
 # 📹 Sistema de Câmeras
 
-Sistema próprio para as câmeras Intelbras, sem propaganda e sem depender do app do fabricante.
+Sistema próprio para as câmeras (iCSee / Intelbras), sem propaganda e sem depender do app do fabricante.
 
-- **Ao vivo**: as duas câmeras numa tela só (toque na imagem para tela cheia)
-- **Gravação contínua** das duas câmeras, em arquivos de 10 minutos, apagando os mais antigos sozinho
+- **Ao vivo**: as câmeras numa tela só (toque na imagem para tela cheia)
+- **Gravação** por câmera: 24h, só quando tem movimento, ou sem gravar
 - **Detecção de movimento** com foto de cada evento
 - **Dados** 📊: eventos por dia, por horário e por dia da semana, e exportação em **CSV** (pandas, Excel, Power BI)
 - **App no celular**: instala na tela inicial e abre direto, como um app de verdade
+- **Nunca enche o disco**: apaga os vídeos mais antigos sozinho
 
 ```
- Câmera 1 ─┐                       ┌─ 📱 celular (app)
-           ├─► computador sempre ──┤
- Câmera 2 ─┘   ligado (servidor)   └─ 💻 navegador
-               grava, analisa e
-               guarda os dados
+ Câmera Sala ────┐                         ┌─ 📱 celular (app)
+ (sem cartão)    ├─► tablet em casa ───────┤
+ Câmera Garagem ─┘   (servidor 24h)        └─ 💻 navegador
+ (com cartão)        grava, analisa e
+                     guarda os dados
 ```
 
-> **Por que precisa de um computador ligado?** O celular não consegue gravar 24h e
-> analisar o vídeo (a bateria e o armazenamento não aguentam). O "cérebro" fica num
-> computador em casa e o celular só abre o app para ver. Serve um PC/notebook velho,
-> um mini PC ou um Raspberry Pi 4/5.
+> **Por que precisa de um aparelho ligado em casa?** As câmeras só são acessíveis pelo
+> Wi-Fi de casa (é isso que as protege). O "cérebro" fica em casa, e o celular só abre o
+> app para ver. Pode ser um tablet Android, um notebook velho, um mini PC ou um Raspberry Pi.
 
 ---
 
 ## 1. Descobrir o link (RTSP) das câmeras
 
-Toda câmera IP tem um link RTSP, que é por onde o sistema pega o vídeo. Você vai precisar de:
+O link RTSP é por onde o sistema pega o vídeo. Você vai precisar de:
 
-- **IP da câmera** na sua rede (aparece no app, nas informações do dispositivo, ou na
-  página do roteador, em "dispositivos conectados"). Ex.: `192.168.1.10`
-- **Usuário e senha** da câmera (normalmente `admin` e a senha/código que fica na etiqueta)
+- **IP da câmera** na sua rede (no app iCSee, em configurações da câmera → informações
+  de rede, ou na página do roteador, em "dispositivos conectados"). Ex.: `192.168.1.10`
+- **Usuário e senha** da câmera (usuário normalmente `admin`)
 
-Intelbras (padrão da maioria dos modelos):
-
-```
-rtsp://admin:SENHA@IP:554/cam/realmonitor?channel=1&subtype=0   ← alta qualidade
-rtsp://admin:SENHA@IP:554/cam/realmonitor?channel=1&subtype=1   ← baixa qualidade
-```
-
-Se a câmera usa o app **iCSee** (câmeras com protocolo XMeye), o formato costuma ser:
+Câmeras do app **iCSee**:
 
 ```
-rtsp://IP:554/user=admin&password=SENHA&channel=1&stream=0.sdp   ← alta
-rtsp://IP:554/user=admin&password=SENHA&channel=1&stream=1.sdp   ← baixa
+rtsp://IP:554/user=admin&password=SENHA&channel=1&stream=0.sdp   ← alta qualidade
+rtsp://IP:554/user=admin&password=SENHA&channel=1&stream=1.sdp   ← baixa qualidade
 ```
 
-**Testar antes:** abra o [VLC](https://www.videolan.org/) → *Mídia → Abrir fluxo de rede* →
-cole o link. Se aparecer a imagem, está certo! ✅
+Outras Intelbras (apps Mibo/iSIC):
 
-> Se a senha tiver caracteres especiais (`@`, `#`, `:`), troque por códigos:
-> `@` → `%40`, `#` → `%23`, `:` → `%3A`.
+```
+rtsp://admin:SENHA@IP:554/cam/realmonitor?channel=1&subtype=0
+rtsp://admin:SENHA@IP:554/cam/realmonitor?channel=1&subtype=1
+```
 
-## 2. Instalar no computador
+**Testar antes:** instale o app **VLC** no celular → *Fluxo de rede* → cole o link.
+Se aparecer a imagem, está certo! ✅
+
+> ⚠️ **Troque a senha padrão das câmeras** no iCSee se ainda não trocou.
+> Se a senha tiver caracteres especiais, troque por códigos: `@` → `%40`, `#` → `%23`, `&` → `%26`.
+
+> 💡 Configure o roteador para dar sempre o **mesmo IP** para as câmeras e para o tablet
+> ("reserva de DHCP" / "IP fixo"). Assim os links não mudam.
+
+## 2. Configurar
+
+Copie `config.exemplo.yaml` para **`config.yaml`** e preencha: nome das câmeras, links RTSP,
+uma senha para o sistema e como cada câmera grava:
+
+| `gravar:` | quando usar |
+|---|---|
+| `"continuo"` | câmera **sem cartão**: o sistema grava 24h |
+| `"movimento"` | câmera **com cartão**: ela já grava 24h, o sistema guarda só os trechos com movimento |
+| `"nao"` | só ao vivo + detecção + dados |
+
+Espaço que cada câmera ocupa gravando 24h (aproximado):
+
+| `qualidade:` | por dia | com 50 GB livres dá |
+|---|---|---|
+| `"alta"` (padrão) | ~10–20 GB | ~3 dias |
+| `"baixa"` | ~2–4 GB | ~2 semanas |
+
+O `config.yaml` **não vai para o GitHub** (tem senhas). Os vídeos e dados também não.
+
+---
+
+## 3A. Instalar no tablet Android (Xiaomi / Redmi Pad) 📟
+
+**Apps** (instale pela loja **F-Droid**, em https://f-droid.org; a versão do Termux da Play Store é antiga e não funciona):
+- **Termux**: onde o sistema roda
+- **Termux:Boot**: liga o sistema sozinho quando o tablet reinicia
+
+No **Termux**, rode um bloco de cada vez:
+
+```bash
+pkg update && pkg upgrade -y
+```
+
+```bash
+pkg install -y python ffmpeg git python-numpy opencv-python
+```
+
+```bash
+pip install starlette uvicorn pyyaml
+```
+
+```bash
+git clone -b claude/elegant-einstein-ehotk8 https://github.com/daianefnsc/daianefnsc.git
+```
+
+```bash
+cd daianefnsc/sistema-cameras && cp config.exemplo.yaml config.yaml && nano config.yaml
+```
+
+(No `nano`: edite, depois `Ctrl+O`, `Enter` para salvar e `Ctrl+X` para sair. O Termux tem uma
+barra com a tecla `Ctrl`.)
+
+Rodar:
+
+```bash
+termux-wake-lock && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Ligar sozinho quando o tablet reiniciar
+
+```bash
+mkdir -p ~/.termux/boot && cp ~/daianefnsc/sistema-cameras/iniciar-android.sh ~/.termux/boot/ && chmod +x ~/.termux/boot/iniciar-android.sh
+```
+
+Depois abra o app **Termux:Boot** uma vez.
+
+### Configurações da Xiaomi (importante!)
+
+A Xiaomi fecha apps em segundo plano para economizar bateria. Para o sistema não parar:
+
+1. **Configurações → Apps → Termux**: *Inicialização automática* **ligada**, e em
+   *Economia de bateria* escolha **Sem restrições**. Faça o mesmo para o **Termux:Boot**.
+2. Abra os apps recentes, segure o Termux e toque no **cadeado** 🔒 para fixá-lo.
+3. **Bateria**: o tablet vai ficar sempre na tomada. Se existir a opção de proteger a
+   bateria / limitar a carga em *Configurações → Bateria*, ative.
+4. Deixe a tela apagar normalmente. O `termux-wake-lock` mantém o sistema rodando.
+
+## 3B. Instalar no computador (Windows / Linux) 💻
 
 Precisa de **Python 3.10+** e **ffmpeg**.
-
-**Windows**
 
 ```bash
 winget install Python.Python.3.12 Gyan.FFmpeg
 ```
 
-**Linux / Raspberry Pi**
+(No Linux: `sudo apt install python3-venv ffmpeg`.) Depois, dentro da pasta `sistema-cameras`:
 
 ```bash
-sudo apt install python3-venv ffmpeg
-```
-
-Depois, dentro da pasta `sistema-cameras`:
-
-```bash
-python -m venv .venv
-```
-
-```bash
-# Windows:  .venv\Scripts\activate      Linux:  source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Copie `config.exemplo.yaml` para **`config.yaml`** e preencha o nome das câmeras, os links RTSP
-e uma senha para o sistema. (O `config.yaml` fica fora do GitHub para proteger as senhas.)
-
-## 3. Rodar
-
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Abra no navegador: `http://localhost:8000`. No celular (no Wi-Fi de casa): `http://IP-DO-COMPUTADOR:8000`.
+---
 
-## 4. Instalar como app no celular
+## 4. Abrir no celular e instalar como app 📱
 
-- **Android (Chrome):** menu ⋮ → *Adicionar à tela inicial* / *Instalar app*
+No Wi-Fi de casa, abra `http://IP-DO-TABLET:8000` no navegador do celular (o IP do tablet
+fica em *Configurações → Wi-Fi → sua rede*).
+
+- **Android (Chrome):** menu ⋮ → *Adicionar à tela inicial*
 - **iPhone (Safari):** botão compartilhar → *Adicionar à Tela de Início*
 
 ## 5. Acessar fora de casa (pelo 4G) 🔒
 
-O jeito mais seguro e fácil é o **[Tailscale](https://tailscale.com)** (grátis): cria uma
-"rede privada" só sua entre o computador e o celular. Não precisa abrir porta no roteador, e
-ninguém de fora consegue chegar nas câmeras.
+Use o **[Tailscale](https://tailscale.com)** (grátis): uma rede privada só sua entre o tablet
+e o celular. Não precisa abrir porta no roteador, e ninguém de fora consegue chegar nas câmeras.
 
-1. Instale o Tailscale no computador e no celular e entre com a mesma conta.
-2. No computador, rode:
-
-```bash
-tailscale serve --bg 8000
-```
-
-3. Ele mostra um endereço tipo `https://meu-pc.tailXXXX.ts.net`. Abra esse endereço no
-   celular e instale como app (passo 4). Com esse endereço `https`, o app funciona completo
-   e abre igual dentro e fora de casa.
-
-## 6. Ligar sozinho quando o computador iniciar
-
-- **Windows:** crie um atalho para `iniciar.bat` (abaixo) e coloque na pasta `shell:startup`.
-
-```bat
-cd /d C:\caminho\para\sistema-cameras
-call .venv\Scripts\activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-- **Linux:** crie um serviço do systemd (posso ajudar a montar).
+1. Instale o app Tailscale no **tablet** e no **celular** e entre com a mesma conta.
+2. No app do Tailscale, veja o IP do tablet (começa com `100.`).
+3. No celular, abra `http://100.x.x.x:8000` e adicione à tela inicial.
+   Esse endereço funciona **dentro e fora de casa**, então pode usar só ele.
 
 ## Ajustes finos
 
@@ -132,9 +179,6 @@ No `config.yaml`, em `movimento`:
 | `sensibilidade` | quanto cada pixel precisa mudar. Muito alarme falso? Aumente (ex.: 35) |
 | `area_minima` | % da imagem que precisa mexer. Folhas/sombras disparando? Aumente (ex.: 3) |
 | `segundos_fim` | quanto tempo parado para encerrar um evento |
-
-Espaço em disco: cada câmera em alta qualidade usa cerca de **10 a 20 GB por dia**.
-Ajuste `dias_guardar` conforme o seu HD. Os **dados** dos eventos nunca são apagados.
 
 ## Analisando os dados no Python 🐍
 
@@ -151,7 +195,7 @@ Ou direto no banco: `dados/eventos.db` (SQLite, tabela `eventos`).
 ## Estrutura
 
 ```
-app/main.py     servidor web (API, login, estatísticas)
+app/main.py     servidor web (API, login, estatísticas, limpeza de espaço)
 app/camera.py   gravação (ffmpeg) + detecção de movimento (OpenCV)
 app/db.py       banco SQLite dos eventos
 static/         o app (HTML/CSS/JS, instalável no celular)
@@ -159,7 +203,7 @@ static/         o app (HTML/CSS/JS, instalável no celular)
 
 ## Próximas ideias 💡
 
-- Alerta no celular (Telegram) quando houver movimento
-- Detectar **pessoas** (não só movimento) com um modelo de IA (YOLO)
+- Alerta no celular (Telegram) quando houver movimento, com a foto
+- Detectar **pessoas** (não só movimento) com IA
 - Zonas: ignorar partes da imagem (rua, árvore)
 - Linha do tempo das gravações com marcação dos movimentos
